@@ -1,25 +1,17 @@
-﻿using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.FlowAnalysis;
-using System.Security.Cryptography;
-using Microsoft.VisualBasic;
-
+﻿
 using ChessChallenge.API;
 using System;
-using System.Numerics;
 using System.Collections.Generic;
 using System.Linq;
-using System.Collections.Concurrent;
 
 public class MyBot : IChessBot
 {
 	int[] pieceValues = { 100, 320, 330, 500, 900, 10000 };
 	Board board;
 	int thinkTime;
-	Timer timer;
+	ChessChallenge.API.Timer timer;
 	bool stop;
-	int tableSize = 16;
+	int tableSize = 256;
 	TranspositionTable table;
 	Move currentBestMove;
 	int currentBestEval;
@@ -31,14 +23,14 @@ public class MyBot : IChessBot
 		this.table = new TranspositionTable(tableSize);
 	}
 
-	public Move Think(Board board, Timer timer)
+	public Move Think(Board board, ChessChallenge.API.Timer timer)
 	{
 		this.table.update(board);
 		this.timer = timer;
 
 		this.board = board;
-		Console.Write("EvilBot");
-		Console.WriteLine("eval " + Evaluation().ToString());
+		//Console.Write("EvilBot");
+		//Console.WriteLine("eval " + Evaluation().ToString());
 		int expectedGameLength = Math.Max(50 - board.PlyCount / 2, 20);
 		this.thinkTime = timer.IncrementMilliseconds + timer.MillisecondsRemaining / expectedGameLength;
 		stop = false;
@@ -51,7 +43,13 @@ public class MyBot : IChessBot
 
 	int Search(int depth, int alpha = -30000, int beta = 30000, bool root = false)
 	{
-		Move[] moves = sortMoves(depth <= 0);
+		int tableEval = table.searchPos(depth, alpha, beta);
+		if (tableEval != int.MinValue)
+		{
+			return tableEval;
+		}
+
+		Move[] moves = sortMoves(depth <= 0, table.getMove());
 
 
 		if (depth <= 0)
@@ -84,12 +82,7 @@ public class MyBot : IChessBot
 
 		//this.table.update(board);
 
-		int tableEval = table.searchPos(depth, alpha, beta);
-		if (tableEval != int.MinValue)
-		{
-			return tableEval;
-		}
-
+		
 		Move bestMovePos = moves[0];
 
 		int evalMode = 1;
@@ -97,10 +90,10 @@ public class MyBot : IChessBot
 		{
 			if (depth == 1)
 			{
-				Console.WriteLine(board.CreateDiagram());
+				//Console.WriteLine(board.CreateDiagram());
 
 			}
-			Console.WriteLine();
+			//Console.WriteLine();
 		}
 
 		foreach (Move move in moves)
@@ -108,11 +101,12 @@ public class MyBot : IChessBot
 			board.MakeMove(move);
 			int eval = -Search(depth - 1, -beta, -alpha);
 			board.UndoMove(move);
-
+			/*
 			if (root)
 			{
 				Console.WriteLine(move.ToString() + "    eval " + eval.ToString() + "    alpha " + alpha.ToString() + "    beta " + beta.ToString());
 			}
+			*/
 
 			if (root && eval > currentBestEval)
 			{
@@ -154,7 +148,7 @@ public class MyBot : IChessBot
 		return alpha;
 	}
 
-	Move[] sortMoves(bool onlyCaptures)
+	Move[] sortMoves(bool onlyCaptures, Move firstMove)
 	{
 		Move[] moves = board.GetLegalMoves(onlyCaptures);
 		Dictionary<Move, int> movesScore = new Dictionary<Move, int>();
@@ -167,6 +161,11 @@ public class MyBot : IChessBot
 			{
 				score += 10 * pieceValues[((int)move.CapturePieceType) - 1] - pieceValues[((int)move.MovePieceType) - 1];
 
+			}
+			if (move == firstMove)
+			{
+				//Console.WriteLine("first move found");
+				score = 100000;
 			}
 
 			movesScore.Add(move, -score);
@@ -190,6 +189,9 @@ public class MyBot : IChessBot
 
 		for (int depth = 1; depth <= maxDepth; depth++)
 		{
+			currentBestEval = -30000;
+			currentBestMove = Move.NullMove;
+
 			Search(depth, -beta, -alpha, true);
 
 			if (!stop || currentBestEval > bestEval)
@@ -208,8 +210,8 @@ public class MyBot : IChessBot
 				Console.WriteLine("MyBot");
 				Console.WriteLine("time: " + timer.MillisecondsElapsedThisTurn.ToString() + " / " + thinkTime.ToString());
 				Console.WriteLine("depth: " + depth.ToString());
-				Console.WriteLine(System.Runtime.InteropServices.Marshal.SizeOf<HashEntry>());
 				Console.WriteLine();
+				
 				stop = true;
 				break;
 			}
@@ -255,7 +257,7 @@ public class MyBot : IChessBot
 
 	int numAttackedSquares()
 	{
-		int sum = 0;
+		int score = 0;
 
 		foreach (PieceList pieceList in board.GetAllPieceLists())
 		{
@@ -264,14 +266,25 @@ public class MyBot : IChessBot
 				if (piece.PieceType != PieceType.Queen && piece.PieceType != PieceType.King)
 				{
 					ulong bb = BitboardHelper.GetPieceAttacks(piece.PieceType, piece.Square, board, piece.IsWhite);
-					sum += BitboardHelper.GetNumberOfSetBits(bb) * (piece.IsWhite ? 1 : -1);
+					score += BitboardHelper.GetNumberOfSetBits(bb) * (piece.IsWhite ? 1 : -1);
 
+				}
+				else if (piece.PieceType == PieceType.King)
+				{
+					ulong bb = BitboardHelper.GetPieceAttacks(PieceType.Queen, piece.Square, board, piece.IsWhite);
+					score -= BitboardHelper.GetNumberOfSetBits(bb) * (piece.IsWhite ? 1 : -1);
+
+					int index = piece.Square.Index;
+					if ((index == 2 || index == 6) && piece.IsWhite)
+						score += 50;
+					else if ((index == 58 || index == 62) && !piece.IsWhite)
+						score -= 50;
 				}
 			}
 
 		}
 
-		return sum;
+		return score;
 	}
 
 
@@ -312,7 +325,7 @@ public class TranspositionTable
 
 	public TranspositionTable(int sizeMB)
 	{
-		this.size = sizeMB * 1024 * 1024 / Marshal.SizeOf<HashEntry>();
+		this.size = sizeMB * 1024 * 1024 / 24;//Marshal.SizeOf<HashEntry>();
 		Console.WriteLine("size " + size.ToString());
 		this.hashEntries = new HashEntry[size];
 	}
@@ -332,10 +345,7 @@ public class TranspositionTable
 	{
 		int index = Math.Abs((int)board.ZobristKey) % size;
 		HashEntry hashEntry = hashEntries[index];
-		if (depth > hashEntry.depth)
-		{
-			return int.MinValue;
-		}
+		
 
 		if (hashEntry.zobrist == board.ZobristKey && hashEntry.depth >= depth)
 		{
@@ -355,4 +365,12 @@ public class TranspositionTable
 
 		return int.MinValue;
 	}
+
+	public Move getMove()
+	{
+		int index = Math.Abs((int)board.ZobristKey) % size;
+		HashEntry hashEntry = hashEntries[index];
+		return hashEntry.move;
+	}
+
 }

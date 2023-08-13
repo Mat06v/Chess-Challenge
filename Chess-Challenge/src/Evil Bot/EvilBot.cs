@@ -1,9 +1,6 @@
 ﻿using ChessChallenge.API;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System;
 using System.Collections.Generic;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Linq;
 
 namespace ChessChallenge.Example
@@ -15,9 +12,9 @@ namespace ChessChallenge.Example
 		int[] pieceValues = { 100, 320, 330, 500, 900, 10000 };
 		Board board;
 		int thinkTime;
-		Timer timer;
+		ChessChallenge.API.Timer timer;
 		bool stop;
-		int tableSize = 16;
+		int tableSize = 256;
 		TranspositionTable table;
 		Move currentBestMove;
 		int currentBestEval;
@@ -29,14 +26,14 @@ namespace ChessChallenge.Example
 			this.table = new TranspositionTable(tableSize);
 		}
 
-		public Move Think(Board board, Timer timer)
+		public Move Think(Board board, ChessChallenge.API.Timer timer)
 		{
 			this.table.update(board);
 			this.timer = timer;
 
 			this.board = board;
-			Console.Write("EvilBot");
-			Console.WriteLine("eval " + Evaluation().ToString());
+			//Console.Write("EvilBot");
+			//Console.WriteLine("eval " + Evaluation().ToString());
 			int expectedGameLength = Math.Max(50 - board.PlyCount / 2, 20);
 			this.thinkTime = timer.IncrementMilliseconds + timer.MillisecondsRemaining / expectedGameLength;
 			stop = false;
@@ -47,9 +44,15 @@ namespace ChessChallenge.Example
 
 
 
-		int Search(int depth, int alpha = -30000, int beta = 30000, bool root = false)
+		int Search(int depth, int alpha = -30000, int beta = 30000, bool root = false, int numExt = 0)
 		{
-			Move[] moves = sortMoves(depth <= 0);
+			int tableEval = table.searchPos(depth, alpha, beta);
+			if (tableEval != int.MinValue)
+			{
+				return tableEval;
+			}
+
+			Move[] moves = sortMoves(depth <= 0, table.getMove());
 
 
 			if (depth <= 0)
@@ -80,12 +83,8 @@ namespace ChessChallenge.Example
 				return -25000 - depth;
 			}
 
+			//this.table.update(board);
 
-			int tableEval = table.searchPos(depth, alpha, beta);
-			if (tableEval != int.MinValue)
-			{
-				return tableEval;
-			}
 
 			Move bestMovePos = moves[0];
 
@@ -94,10 +93,10 @@ namespace ChessChallenge.Example
 			{
 				if (depth == 1)
 				{
-					Console.WriteLine(board.CreateDiagram());
+					//Console.WriteLine(board.CreateDiagram());
 
 				}
-				Console.WriteLine();
+				//Console.WriteLine();
 			}
 
 			foreach (Move move in moves)
@@ -105,11 +104,12 @@ namespace ChessChallenge.Example
 				board.MakeMove(move);
 				int eval = -Search(depth - 1, -beta, -alpha);
 				board.UndoMove(move);
-
+				/*
 				if (root)
 				{
 					Console.WriteLine(move.ToString() + "    eval " + eval.ToString() + "    alpha " + alpha.ToString() + "    beta " + beta.ToString());
 				}
+				*/
 
 				if (root && eval > currentBestEval)
 				{
@@ -119,6 +119,8 @@ namespace ChessChallenge.Example
 				//alpha beta pruning
 				if (eval >= beta)
 				{
+					//this.table.update(board);
+
 					table.store(depth, 2, beta, bestMovePos);
 
 					return beta;
@@ -142,13 +144,14 @@ namespace ChessChallenge.Example
 				}
 
 			}
+			//this.table.update(board);
 
 			table.store(depth, evalMode, alpha, bestMovePos);
 
 			return alpha;
 		}
 
-		Move[] sortMoves(bool onlyCaptures)
+		Move[] sortMoves(bool onlyCaptures, Move firstMove)
 		{
 			Move[] moves = board.GetLegalMoves(onlyCaptures);
 			Dictionary<Move, int> movesScore = new Dictionary<Move, int>();
@@ -161,6 +164,11 @@ namespace ChessChallenge.Example
 				{
 					score += 10 * pieceValues[((int)move.CapturePieceType) - 1] - pieceValues[((int)move.MovePieceType) - 1];
 
+				}
+				if (move == firstMove)
+				{
+					//Console.WriteLine("first move found");
+					score = 100000;
 				}
 
 				movesScore.Add(move, -score);
@@ -184,6 +192,9 @@ namespace ChessChallenge.Example
 
 			for (int depth = 1; depth <= maxDepth; depth++)
 			{
+				currentBestEval = -30000;
+				currentBestMove = Move.NullMove;
+
 				Search(depth, -beta, -alpha, true);
 
 				if (!stop || currentBestEval > bestEval)
@@ -199,11 +210,11 @@ namespace ChessChallenge.Example
 
 				if (timer.MillisecondsElapsedThisTurn > thinkTime / 2)
 				{
-					Console.WriteLine("MyBot");
-					Console.WriteLine("time: " + timer.MillisecondsElapsedThisTurn.ToString() + " / " + thinkTime.ToString());
-					Console.WriteLine("depth: " + depth.ToString());
-					Console.WriteLine(System.Runtime.InteropServices.Marshal.SizeOf<HashEntry>());
-					Console.WriteLine();
+				Console.WriteLine("EvilBot");
+				Console.WriteLine("time: " + timer.MillisecondsElapsedThisTurn.ToString() + " / " + thinkTime.ToString());
+				Console.WriteLine("depth: " + depth.ToString());
+				Console.WriteLine();
+				 
 					stop = true;
 					break;
 				}
@@ -255,21 +266,30 @@ namespace ChessChallenge.Example
 			{
 				foreach (Piece piece in pieceList)
 				{
-					ulong bb = BitboardHelper.GetPieceAttacks(piece.PieceType, piece.Square, board, piece.IsWhite);
-					sum += BitboardHelper.GetNumberOfSetBits(bb) * (piece.IsWhite ? 1 : -1);
+					if (piece.PieceType != PieceType.Queen && piece.PieceType != PieceType.King)
+					{
+						ulong bb = BitboardHelper.GetPieceAttacks(piece.PieceType, piece.Square, board, piece.IsWhite);
+						sum += BitboardHelper.GetNumberOfSetBits(bb) * (piece.IsWhite ? 1 : -1);
+
+					}
+					else if (piece.PieceType == PieceType.King)
+					{
+						ulong bb = BitboardHelper.GetPieceAttacks(PieceType.Queen, piece.Square, board, piece.IsWhite);
+						sum -= BitboardHelper.GetNumberOfSetBits(bb) * (piece.IsWhite ? 1 : -1);
+
+						 
+					}
+
 				}
-
 			}
-
-			//sum -= 10 * BitboardHelper.GetNumberOfSetBits(BitboardHelper.GetSliderAttacks(PieceType.Queen, board.GetPieceList(PieceType.King, true)[0].Square, board.WhitePiecesBitboard));
-			//sum += 10 * BitboardHelper.GetNumberOfSetBits(BitboardHelper.GetSliderAttacks(PieceType.Queen, board.GetPieceList(PieceType.King, false)[0].Square, board.BlackPiecesBitboard));
 			return sum;
 		}
-
-
-
-
 	}
+
+
+
+
+	
 
 	public struct HashEntry
 	{
@@ -304,7 +324,7 @@ namespace ChessChallenge.Example
 
 		public TranspositionTable(int sizeMB)
 		{
-			this.size = sizeMB * 1024 * 1024 / Marshal.SizeOf<HashEntry>();
+			this.size = sizeMB * 1024 * 1024 / 24;//Marshal.SizeOf<HashEntry>();
 			Console.WriteLine("size " + size.ToString());
 			this.hashEntries = new HashEntry[size];
 		}
@@ -324,10 +344,7 @@ namespace ChessChallenge.Example
 		{
 			int index = Math.Abs((int)board.ZobristKey) % size;
 			HashEntry hashEntry = hashEntries[index];
-			if (depth > hashEntry.depth)
-			{
-				return int.MinValue;
-			}
+
 
 			if (hashEntry.zobrist == board.ZobristKey && hashEntry.depth >= depth)
 			{
@@ -347,7 +364,16 @@ namespace ChessChallenge.Example
 
 			return int.MinValue;
 		}
+
+		public Move getMove()
+		{
+			int index = Math.Abs((int)board.ZobristKey) % size;
+			HashEntry hashEntry = hashEntries[index];
+			return hashEntry.move;
+		}
+
 	}
+
 
 
 }
