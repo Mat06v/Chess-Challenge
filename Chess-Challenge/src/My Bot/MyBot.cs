@@ -29,8 +29,6 @@ public class MyBot : IChessBot
 		this.timer = timer;
 
 		this.board = board;
-		//Console.Write("EvilBot");
-		//Console.WriteLine("eval " + Evaluation().ToString());
 		int expectedGameLength = Math.Max(50 - board.PlyCount / 2, 20);
 		this.thinkTime = timer.IncrementMilliseconds + timer.MillisecondsRemaining / expectedGameLength;
 		stop = false;
@@ -46,6 +44,12 @@ public class MyBot : IChessBot
 		int tableEval = table.searchPos(depth, alpha, beta);
 		if (tableEval != int.MinValue)
 		{
+			if (root && tableEval > currentBestEval)
+			{
+				currentBestEval = tableEval;
+				currentBestMove = table.getMove();
+			}
+
 			return tableEval;
 		}
 
@@ -54,8 +58,6 @@ public class MyBot : IChessBot
 
 		if (depth <= 0)
 		{
-			//return Quiesce(alpha, beta);
-
 			int stand_pat = Evaluation();
 			if (stand_pat >= beta)
 				return beta;
@@ -80,33 +82,18 @@ public class MyBot : IChessBot
 			return -25000 - depth;
 		}
 
-		//this.table.update(board);
-
-		
+	
 		Move bestMovePos = moves[0];
 
 		int evalMode = 1;
-		if (root)
-		{
-			if (depth == 1)
-			{
-				//Console.WriteLine(board.CreateDiagram());
-
-			}
-			//Console.WriteLine();
-		}
+		
 
 		foreach (Move move in moves)
 		{
 			board.MakeMove(move);
 			int eval = -Search(depth - 1, -beta, -alpha);
 			board.UndoMove(move);
-			/*
-			if (root)
-			{
-				Console.WriteLine(move.ToString() + "    eval " + eval.ToString() + "    alpha " + alpha.ToString() + "    beta " + beta.ToString());
-			}
-			*/
+			
 
 			if (root && eval > currentBestEval)
 			{
@@ -116,8 +103,6 @@ public class MyBot : IChessBot
 			//alpha beta pruning
 			if (eval >= beta)
 			{
-				//this.table.update(board);
-
 				table.store(depth, 2, beta, bestMovePos);
 
 				return beta;
@@ -141,7 +126,6 @@ public class MyBot : IChessBot
 			}
 
 		}
-		//this.table.update(board);
 
 		table.store(depth, evalMode, alpha, bestMovePos);
 
@@ -151,27 +135,27 @@ public class MyBot : IChessBot
 	Move[] sortMoves(bool onlyCaptures, Move firstMove)
 	{
 		Move[] moves = board.GetLegalMoves(onlyCaptures);
-		Dictionary<Move, int> movesScore = new Dictionary<Move, int>();
+		int[] scores = new int[moves.Length];
 
-		foreach (Move move in board.GetLegalMoves())
+		for (int i = 0; i < scores.Length; i++)
 		{
 			int score = 0;
 
-			if (move.IsCapture)
+			if (moves[i].IsCapture)
 			{
-				score += 10 * pieceValues[((int)move.CapturePieceType) - 1] - pieceValues[((int)move.MovePieceType) - 1];
+				score += 10 * pieceValues[((int)moves[i].CapturePieceType) - 1] - pieceValues[((int)moves[i].MovePieceType) - 1];
 
 			}
-			if (move == firstMove)
+			if (moves[i] == firstMove)
 			{
-				//Console.WriteLine("first move found");
 				score = 100000;
 			}
 
-			movesScore.Add(move, -score);
+			scores[i] = -score;
 		}
 
-		return moves.OrderBy(move => movesScore[move]).ToArray();
+		Array.Sort(scores, moves);
+		return moves;
 	}
 
 
@@ -181,29 +165,16 @@ public class MyBot : IChessBot
 		int maxDepth = 50;
 		bestEval = -30000;
 		bestMove = Move.NullMove;
-
-		currentBestEval = -30000;
-		currentBestMove = Move.NullMove;
 		int alpha = -30000;
 		int beta = 30000;
+		int windowSize = 50;
 
-		for (int depth = 1; depth <= maxDepth; depth++)
+
+		for (int depth = 1; depth <= maxDepth; depth ++)
 		{
 			currentBestEval = -30000;
 			currentBestMove = Move.NullMove;
-
 			Search(depth, -beta, -alpha, true);
-
-			if (!stop || currentBestEval > bestEval)
-			{
-				bestMove = currentBestMove;
-				bestEval = currentBestEval;
-
-			}
-
-
-
-			//alpha beta pruning
 
 			if (timer.MillisecondsElapsedThisTurn > thinkTime / 2)
 			{
@@ -215,6 +186,28 @@ public class MyBot : IChessBot
 				stop = true;
 				break;
 			}
+
+			if (!stop || currentBestEval > bestEval)
+			{
+				bestMove = currentBestMove;
+				bestEval = currentBestEval;
+				
+			}
+
+
+			if (bestEval >= beta || bestEval <= alpha)
+			{
+				alpha = -30000;
+				beta = 30000;
+				depth--;
+			}
+			else
+			{
+				alpha = bestEval - windowSize;
+				beta = bestEval + windowSize;
+			}
+
+
 
 		}
 
