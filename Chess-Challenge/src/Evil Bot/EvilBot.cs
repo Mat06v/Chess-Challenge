@@ -14,7 +14,7 @@ namespace ChessChallenge.Example
 		int thinkTime;
 		ChessChallenge.API.Timer timer;
 		bool stop;
-		int tableSize = 256;
+		int tableSize = 128;
 		TranspositionTable table;
 		Move currentBestMove;
 		int currentBestEval;
@@ -32,8 +32,6 @@ namespace ChessChallenge.Example
 			this.timer = timer;
 
 			this.board = board;
-			//Console.Write("EvilBot");
-			//Console.WriteLine("eval " + Evaluation().ToString());
 			int expectedGameLength = Math.Max(50 - board.PlyCount / 2, 20);
 			this.thinkTime = timer.IncrementMilliseconds + timer.MillisecondsRemaining / expectedGameLength;
 			stop = false;
@@ -44,11 +42,17 @@ namespace ChessChallenge.Example
 
 
 
-		int Search(int depth, int alpha = -30000, int beta = 30000, bool root = false, int numExt = 0)
+		int Search(int depth, int alpha = -30000, int beta = 30000, bool root = false)
 		{
 			int tableEval = table.searchPos(depth, alpha, beta);
 			if (tableEval != int.MinValue)
 			{
+				if (root && tableEval > currentBestEval)
+				{
+					currentBestEval = tableEval;
+					currentBestMove = table.getMove();
+				}
+
 				return tableEval;
 			}
 
@@ -57,8 +61,6 @@ namespace ChessChallenge.Example
 
 			if (depth <= 0)
 			{
-				//return Quiesce(alpha, beta);
-
 				int stand_pat = Evaluation();
 				if (stand_pat >= beta)
 					return beta;
@@ -83,33 +85,18 @@ namespace ChessChallenge.Example
 				return -25000 - depth;
 			}
 
-			//this.table.update(board);
-
 
 			Move bestMovePos = moves[0];
 
 			int evalMode = 1;
-			if (root)
-			{
-				if (depth == 1)
-				{
-					//Console.WriteLine(board.CreateDiagram());
 
-				}
-				//Console.WriteLine();
-			}
 
 			foreach (Move move in moves)
 			{
 				board.MakeMove(move);
 				int eval = -Search(depth - 1, -beta, -alpha);
 				board.UndoMove(move);
-				/*
-				if (root)
-				{
-					Console.WriteLine(move.ToString() + "    eval " + eval.ToString() + "    alpha " + alpha.ToString() + "    beta " + beta.ToString());
-				}
-				*/
+
 
 				if (root && eval > currentBestEval)
 				{
@@ -119,8 +106,6 @@ namespace ChessChallenge.Example
 				//alpha beta pruning
 				if (eval >= beta)
 				{
-					//this.table.update(board);
-
 					table.store(depth, 2, beta, bestMovePos);
 
 					return beta;
@@ -144,7 +129,6 @@ namespace ChessChallenge.Example
 				}
 
 			}
-			//this.table.update(board);
 
 			table.store(depth, evalMode, alpha, bestMovePos);
 
@@ -154,27 +138,27 @@ namespace ChessChallenge.Example
 		Move[] sortMoves(bool onlyCaptures, Move firstMove)
 		{
 			Move[] moves = board.GetLegalMoves(onlyCaptures);
-			Dictionary<Move, int> movesScore = new Dictionary<Move, int>();
+			int[] scores = new int[moves.Length];
 
-			foreach (Move move in board.GetLegalMoves())
+			for (int i = 0; i < scores.Length; i++)
 			{
 				int score = 0;
 
-				if (move.IsCapture)
+				if (moves[i].IsCapture)
 				{
-					score += 10 * pieceValues[((int)move.CapturePieceType) - 1] - pieceValues[((int)move.MovePieceType) - 1];
+					score += 10 * pieceValues[((int)moves[i].CapturePieceType) - 1] - pieceValues[((int)moves[i].MovePieceType) - 1];
 
 				}
-				if (move == firstMove)
+				if (moves[i] == firstMove)
 				{
-					//Console.WriteLine("first move found");
 					score = 100000;
 				}
 
-				movesScore.Add(move, -score);
+				scores[i] = -score;
 			}
 
-			return moves.OrderBy(move => movesScore[move]).ToArray();
+			Array.Sort(scores, moves);
+			return moves;
 		}
 
 
@@ -184,18 +168,27 @@ namespace ChessChallenge.Example
 			int maxDepth = 50;
 			bestEval = -30000;
 			bestMove = Move.NullMove;
-
-			currentBestEval = -30000;
-			currentBestMove = Move.NullMove;
 			int alpha = -30000;
 			int beta = 30000;
+			int windowSize = 50;
+
 
 			for (int depth = 1; depth <= maxDepth; depth++)
 			{
 				currentBestEval = -30000;
 				currentBestMove = Move.NullMove;
-
 				Search(depth, -beta, -alpha, true);
+
+				if (timer.MillisecondsElapsedThisTurn > thinkTime / 2)
+				{
+					Console.WriteLine("EvilBot");
+					Console.WriteLine("time: " + timer.MillisecondsElapsedThisTurn.ToString() + " / " + thinkTime.ToString());
+					Console.WriteLine("depth: " + depth.ToString());
+					Console.WriteLine();
+
+					stop = true;
+					break;
+				}
 
 				if (!stop || currentBestEval > bestEval)
 				{
@@ -205,19 +198,19 @@ namespace ChessChallenge.Example
 				}
 
 
-
-				//alpha beta pruning
-
-				if (timer.MillisecondsElapsedThisTurn > thinkTime / 2)
+				if (bestEval >= beta || bestEval <= alpha)
 				{
-				Console.WriteLine("EvilBot");
-				Console.WriteLine("time: " + timer.MillisecondsElapsedThisTurn.ToString() + " / " + thinkTime.ToString());
-				Console.WriteLine("depth: " + depth.ToString());
-				Console.WriteLine();
-				 
-					stop = true;
-					break;
+					alpha = -30000;
+					beta = 30000;
+					depth--;
 				}
+				else
+				{
+					alpha = bestEval - windowSize;
+					beta = bestEval + windowSize;
+				}
+
+
 
 			}
 
@@ -231,20 +224,10 @@ namespace ChessChallenge.Example
 		{
 
 			if (board.IsInCheckmate())
-			{
-				if (board.IsWhiteToMove)
-				{
-					return -25000;
-				}
-				else
-				{
-					return 25000;
-				}
-			}
+				return board.IsWhiteToMove ? -25000 : 25000;
+
 			if (board.IsDraw())
-			{
 				return 0;
-			}
 
 			int eval = 0;
 			PieceList[] pieces = board.GetAllPieceLists();
@@ -253,43 +236,45 @@ namespace ChessChallenge.Example
 			{
 				eval += pieceValues[i] * (pieces[i].Count - pieces[i + 6].Count);
 			}
-			eval += numAttackedSquares();
 
-			return eval * ((board.IsWhiteToMove) ? 1 : -1);
-		}
-
-		int numAttackedSquares()
-		{
-			int sum = 0;
-
-			foreach (PieceList pieceList in board.GetAllPieceLists())
+			foreach (PieceList pieceList in pieces)
 			{
 				foreach (Piece piece in pieceList)
 				{
-					if (piece.PieceType != PieceType.Queen && piece.PieceType != PieceType.King)
+					if (!piece.IsQueen && !piece.IsKing)
 					{
 						ulong bb = BitboardHelper.GetPieceAttacks(piece.PieceType, piece.Square, board, piece.IsWhite);
-						sum += BitboardHelper.GetNumberOfSetBits(bb) * (piece.IsWhite ? 1 : -1);
-
+						eval += BitboardHelper.GetNumberOfSetBits(bb) * (piece.IsWhite ? 1 : -1);
 					}
-					else if (piece.PieceType == PieceType.King)
+					if (piece.IsKing)
 					{
 						ulong bb = BitboardHelper.GetPieceAttacks(PieceType.Queen, piece.Square, board, piece.IsWhite);
-						sum -= BitboardHelper.GetNumberOfSetBits(bb) * (piece.IsWhite ? 1 : -1);
+						eval -= BitboardHelper.GetNumberOfSetBits(bb) * (piece.IsWhite ? 1 : -1);
 
-						 
+						int index = piece.Square.Index;
+						if ((index == 2 || index == 6) && piece.IsWhite)
+							eval += 50;
+						else if ((index == 58 || index == 62) && !piece.IsWhite)
+							eval -= 50;
 					}
-
+					else if (false && piece.IsKnight)
+					{
+						eval += 10;
+					}
 				}
+
 			}
-			return sum;
+
+			return eval * (board.IsWhiteToMove ? 1 : -1);
 		}
+
+		int manhattanDistFromCenter(Square square)
+		{
+			return Math.Min(square.Rank, square.File);
+		}
+
+
 	}
-
-
-
-
-	
 
 	public struct HashEntry
 	{
@@ -373,7 +358,5 @@ namespace ChessChallenge.Example
 		}
 
 	}
-
-
 
 }

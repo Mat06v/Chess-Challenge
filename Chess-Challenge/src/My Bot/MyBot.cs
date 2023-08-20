@@ -11,7 +11,7 @@ public class MyBot : IChessBot
 	int thinkTime;
 	ChessChallenge.API.Timer timer;
 	bool stop;
-	int tableSize = 256;
+	int tableSize = 128;
 	TranspositionTable table;
 	Move currentBestMove;
 	int currentBestEval;
@@ -21,6 +21,15 @@ public class MyBot : IChessBot
 	public MyBot()
 	{
 		this.table = new TranspositionTable(tableSize);
+
+		/* //load transposition table during construction (only works for starting position)
+		this.board = Board.CreateBoardFromFEN("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+		this.table.update(board);
+
+		this.timer = new Timer(5000);
+		this.thinkTime = 5000;
+		startSearch();
+		*/
 	}
 
 	public Move Think(Board board, ChessChallenge.API.Timer timer)
@@ -221,20 +230,10 @@ public class MyBot : IChessBot
 	{
 
 		if (board.IsInCheckmate())
-		{
-			if (board.IsWhiteToMove)
-			{
-				return -25000;
-			}
-			else
-			{
-				return 25000;
-			}
-		}
+			return board.IsWhiteToMove ? -25000 : 25000;
+
 		if (board.IsDraw())
-		{
 			return 0;
-		}
 
 		int eval = 0;
 		PieceList[] pieces = board.GetAllPieceLists();
@@ -243,44 +242,42 @@ public class MyBot : IChessBot
 		{
 			eval += pieceValues[i] * (pieces[i].Count - pieces[i + 6].Count);
 		}
-		eval += numAttackedSquares();
 
-		return eval * ((board.IsWhiteToMove) ? 1 : -1);
-	}
-
-	int numAttackedSquares()
-	{
-		int score = 0;
-
-		foreach (PieceList pieceList in board.GetAllPieceLists())
+		foreach (PieceList pieceList in pieces)
 		{
 			foreach (Piece piece in pieceList)
 			{
-				if (piece.PieceType != PieceType.Queen && piece.PieceType != PieceType.King)
+				if (!piece.IsQueen && !piece.IsKing)
 				{
 					ulong bb = BitboardHelper.GetPieceAttacks(piece.PieceType, piece.Square, board, piece.IsWhite);
-					score += BitboardHelper.GetNumberOfSetBits(bb) * (piece.IsWhite ? 1 : -1);
-
+					eval += BitboardHelper.GetNumberOfSetBits(bb) * (piece.IsWhite ? 1 : -1);
 				}
-				else if (piece.PieceType == PieceType.King)
+				if (piece.IsKing)
 				{
 					ulong bb = BitboardHelper.GetPieceAttacks(PieceType.Queen, piece.Square, board, piece.IsWhite);
-					score -= BitboardHelper.GetNumberOfSetBits(bb) * (piece.IsWhite ? 1 : -1);
+					eval -= BitboardHelper.GetNumberOfSetBits(bb) * (piece.IsWhite ? 1 : -1);
 
 					int index = piece.Square.Index;
 					if ((index == 2 || index == 6) && piece.IsWhite)
-						score += 50;
+						eval += 50;
 					else if ((index == 58 || index == 62) && !piece.IsWhite)
-						score -= 50;
+						eval -= 50;
+				}
+				else if (false && piece.IsKnight)
+				{
+					eval += 10;
 				}
 			}
 
 		}
 
-		return score;
+		return eval * (board.IsWhiteToMove ? 1 : -1);
 	}
 
-
+	int manhattanDistFromCenter(Square square)
+	{
+		return Math.Min(square.Rank, square.File);
+	}
 
 
 }
